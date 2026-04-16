@@ -1,0 +1,8 @@
+.gradio-container { max-width: 100% !important; }
+#kafka-use-cases, #clickhouse-use-cases { width: 280px !important; max-width: 280px !important; }
+#kafka-use-cases .wrap, #clickhouse-use-cases .wrap { max-height: 320px !important; overflow-y: auto !important; }
+#kafka-messages .cm-editor, #clickhouse-messages .cm-editor { height: 320px !important; }
+#kafka-messages .cm-scroller, #clickhouse-messages .cm-scroller { overflow: auto !important; }
+#kafka-hooks .cm-editor, #clickhouse-hooks .cm-editor { height: 190px !important; }
+#kafka-hooks .cm-scroller, #clickhouse-hooks .cm-scroller { overflow: auto !important; }
+footer { display: none !important; }

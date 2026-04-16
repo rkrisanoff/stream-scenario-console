@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qa-clickhouse-kafka-helper"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "adaptix>=3.0.0b11",
+    "aiokafka>=0.13.0",
+    "clickhouse-connect>=0.9.2",
+    "gradio>=6.12.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
+
+[project.scripts]
+run-app = "console.app:main"
+run-tests = "console.test_runner:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/console"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/console/static" = "console/static"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/console/**",
+    "tests/**",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
