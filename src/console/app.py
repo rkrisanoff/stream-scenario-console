@@ -1,8 +1,5 @@
-import asyncio
 import clickhouse_connect
-import json
 from pathlib import Path
-import time
 
 import gradio as gr
 
@@ -21,6 +18,7 @@ from console.dtos import (
 )
 from console.help_texts import build_main_help_columns
 from console.parser import DIRECTIVE_CLICKHOUSE_TABLE, DIRECTIVE_TIMEOUT, MessageParser
+from console.runner import ScenarioRunner
 
 
 CONFIG_PATH = Path("configuration.json")
@@ -246,26 +244,36 @@ def delete_clickhouse(state: AppState) -> ClickHouseView:
     return clickhouse_view(state, "ok: deleted")
 
 
-async def send_kafka(state: AppState, bootstrap_url: str, topic: str, hooks: str, messages: str, global_timeout_ms: float) -> tuple[AppState, str]:
+async def send_kafka(
+    state: AppState,
+    bootstrap_url: str,
+    topic: str,
+    hooks: str,
+    messages: str,
+    global_timeout_ms: float,
+) -> tuple[AppState, str, str]:
     save_kafka_form(state, bootstrap_url, topic, hooks, messages, global_timeout_ms)
+    logs: list[str] = []
+    runner = ScenarioRunner(log_handler=logs.append)
     try:
         from aiokafka import AIOKafkaProducer
     except Exception as exc:
-        return state, f"error: {exc}"
+        return state, f"error: {exc}", "\n".join(logs)
     try:
         parsed = PARSER.parse_messages(messages, int(global_timeout_ms), hooks)
+        commands = runner.build_kafka_commands(parsed, topic)
         producer = AIOKafkaProducer(bootstrap_servers=bootstrap_url)
+        runner.emit_log(f"kafka producer start -> {bootstrap_url}")
         await producer.start()
         try:
-            for index, item in enumerate(parsed):
-                await producer.send_and_wait(topic, item.text.encode("utf-8"))
-                if index < len(parsed) - 1:
-                    await asyncio.sleep(item.delay_ms / 1000)
+            await runner.run_kafka_commands(producer, commands)
         finally:
             await producer.stop()
+            runner.emit_log("kafka producer stop")
     except Exception as exc:
-        return state, f"error: {exc}"
-    return state, f"ok: sent {len(parsed)}"
+        runner.emit_log(f"error: {exc}")
+        return state, f"error: {exc}", "\n".join(logs)
+    return state, f"ok: sent {len(parsed)}", "\n".join(logs)
 
 
 def send_clickhouse(
@@ -278,10 +286,13 @@ def send_clickhouse(
     hooks: str,
     messages: str,
     global_timeout_ms: float,
-) -> tuple[AppState, str]:
+) -> tuple[AppState, str, str]:
     save_clickhouse_form(state, host, port, user, password, database, hooks, messages, global_timeout_ms)
+    logs: list[str] = []
+    runner = ScenarioRunner(log_handler=logs.append)
     try:
         actions = PARSER.parse_clickhouse_messages(messages, int(global_timeout_ms), hooks)
+        commands = runner.build_clickhouse_commands(actions)
         client = clickhouse_connect.get_client(
             host=host.strip(),
             port=int(port),
@@ -289,19 +300,14 @@ def send_clickhouse(
             password=password,
             database=database.strip(),
         )
-        for index, action in enumerate(actions):
-            if action.kind == "json":
-                row = json.loads(action.text)
-                if not isinstance(row, dict):
-                    raise ValueError("json message must be object")
-                client.insert(action.table_name, [list(row.values())], column_names=list(row.keys()))
-            else:
-                client.command(action.text)
-            if index < len(actions) - 1:
-                time.sleep(action.delay_ms / 1000)
+        runner.emit_log(f"clickhouse connect -> {host}:{int(port)}/{database}")
+        runner.run_clickhouse_commands(client, commands)
+        client.close()
+        runner.emit_log("clickhouse client close")
     except Exception as exc:
-        return state, f"error: {exc}"
-    return state, f"ok: sent {len(actions)}"
+        runner.emit_log(f"error: {exc}")
+        return state, f"error: {exc}", "\n".join(logs)
+    return state, f"ok: sent {len(actions)}", "\n".join(logs)
 
 
 def save_all(
@@ -382,6 +388,8 @@ with gr.Blocks(title="QA ClickHouse Kafka Helper", fill_width=True) as app:
                     kafka_timeout = gr.Number(label="Global timeout (ms)", precision=0, value=initial_kafka.global_timeout_ms)
                     kafka_send = gr.Button("Send")
                     kafka_status = gr.Textbox(label="Status", interactive=False, value="")
+                    with gr.Accordion("Console logs", open=False):
+                        kafka_console = gr.Textbox(label="Logs", lines=12, interactive=False, elem_id="kafka-console")
 
         with gr.Tab("ClickHouse"):
             with gr.Row():
@@ -403,6 +411,8 @@ with gr.Blocks(title="QA ClickHouse Kafka Helper", fill_width=True) as app:
                     clickhouse_timeout = gr.Number(label="Global timeout (ms)", precision=0, value=initial_clickhouse.global_timeout_ms)
                     clickhouse_send = gr.Button("Send")
                     clickhouse_status = gr.Textbox(label="Status", interactive=False, value="")
+                    with gr.Accordion("Console logs", open=False):
+                        clickhouse_console = gr.Textbox(label="Logs", lines=12, interactive=False, elem_id="clickhouse-console")
 
     save_button.click(
         save_all,
@@ -477,7 +487,7 @@ with gr.Blocks(title="QA ClickHouse Kafka Helper", fill_width=True) as app:
     kafka_hooks.change(save_kafka_form, [state, kafka_url, kafka_topic, kafka_hooks, kafka_messages, kafka_timeout], [state])
     kafka_messages.change(save_kafka_form, [state, kafka_url, kafka_topic, kafka_hooks, kafka_messages, kafka_timeout], [state])
     kafka_timeout.change(save_kafka_form, [state, kafka_url, kafka_topic, kafka_hooks, kafka_messages, kafka_timeout], [state])
-    kafka_send.click(send_kafka, [state, kafka_url, kafka_topic, kafka_hooks, kafka_messages, kafka_timeout], [state, kafka_status])
+    kafka_send.click(send_kafka, [state, kafka_url, kafka_topic, kafka_hooks, kafka_messages, kafka_timeout], [state, kafka_status, kafka_console])
 
     clickhouse_list.select(
         select_clickhouse_rendered,
@@ -507,7 +517,7 @@ with gr.Blocks(title="QA ClickHouse Kafka Helper", fill_width=True) as app:
     clickhouse_hooks.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
     clickhouse_messages.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
     clickhouse_timeout.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
-    clickhouse_send.click(send_clickhouse, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state, clickhouse_status])
+    clickhouse_send.click(send_clickhouse, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state, clickhouse_status, clickhouse_console])
 
 
 def main() -> None:

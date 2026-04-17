@@ -9,15 +9,18 @@ from uuid import uuid4
 class Directive(StrEnum):
     TIMEOUT = "@timeout"
     CLICKHOUSE_TABLE = "@clickhouse.table"
+    REPEAT = "@repeat"
 
 
 DIRECTIVE_TIMEOUT = Directive.TIMEOUT
 DIRECTIVE_CLICKHOUSE_TABLE = Directive.CLICKHOUSE_TABLE
+DIRECTIVE_REPEAT = Directive.REPEAT
 
 class LineKind(StrEnum):
     MESSAGE = "message"
     TIMEOUT = "timeout"
     CLICKHOUSE_TABLE = "clickhouse_table"
+    REPEAT = "repeat"
 
 
 class ClickHouseActionKind(StrEnum):
@@ -151,6 +154,9 @@ class MessageParser:
             if line.startswith(DIRECTIVE_CLICKHOUSE_TABLE):
                 result.append(ParsedLine(kind=LineKind.CLICKHOUSE_TABLE, payload=self._parse_directive_payload(line)))
                 continue
+            if line.startswith(DIRECTIVE_REPEAT):
+                result.append(ParsedLine(kind=LineKind.REPEAT, payload=self._parse_directive_payload(line)))
+                continue
             result.append(ParsedLine(kind=LineKind.MESSAGE, payload=line))
         return result
 
@@ -165,16 +171,22 @@ class MessageParser:
         result: list[ParsedMessage] = []
         global_delay = int(global_timeout_ms)
         next_timeout: int | None = None
+        next_repeat_count = 1
         for row in rows:
             if row.kind == LineKind.TIMEOUT:
                 next_timeout = self._parse_duration_to_ms(row.payload)
                 continue
             if row.kind == LineKind.CLICKHOUSE_TABLE:
                 continue
+            if row.kind == LineKind.REPEAT:
+                next_repeat_count = self._parse_repeat_count(row.payload)
+                continue
             text = self._replace_anchors(row.payload, anchors)
             timeout_ms = global_delay if next_timeout is None else next_timeout
-            result.append(ParsedMessage(delay_ms=timeout_ms, text=text))
+            for _ in range(next_repeat_count):
+                result.append(ParsedMessage(delay_ms=timeout_ms, text=text))
             next_timeout = None
+            next_repeat_count = 1
         return result
 
     def parse_clickhouse_messages(
@@ -189,12 +201,16 @@ class MessageParser:
         current_table = ""
         global_delay = int(global_timeout_ms)
         next_timeout: int | None = None
+        next_repeat_count = 1
         for row in rows:
             if row.kind == LineKind.TIMEOUT:
                 next_timeout = self._parse_duration_to_ms(row.payload)
                 continue
             if row.kind == LineKind.CLICKHOUSE_TABLE:
                 current_table = row.payload
+                continue
+            if row.kind == LineKind.REPEAT:
+                next_repeat_count = self._parse_repeat_count(row.payload)
                 continue
             timeout_ms = global_delay if next_timeout is None else next_timeout
             next_timeout = None
@@ -207,23 +223,26 @@ class MessageParser:
             if is_json_object:
                 if not current_table:
                     raise ValueError("set @clickhouse.table before JSON message")
-                result.append(
-                    ParsedClickHouseAction(
-                        kind=ClickHouseActionKind.JSON,
-                        table_name=current_table,
-                        text=text,
-                        delay_ms=timeout_ms,
+                for _ in range(next_repeat_count):
+                    result.append(
+                        ParsedClickHouseAction(
+                            kind=ClickHouseActionKind.JSON,
+                            table_name=current_table,
+                            text=text,
+                            delay_ms=timeout_ms,
+                        )
                     )
-                )
             else:
-                result.append(
-                    ParsedClickHouseAction(
-                        kind=ClickHouseActionKind.SQL,
-                        table_name="",
-                        text=text,
-                        delay_ms=timeout_ms,
+                for _ in range(next_repeat_count):
+                    result.append(
+                        ParsedClickHouseAction(
+                            kind=ClickHouseActionKind.SQL,
+                            table_name="",
+                            text=text,
+                            delay_ms=timeout_ms,
+                        )
                     )
-                )
+            next_repeat_count = 1
         return result
 
     def _replace_anchors(self, line: str, anchors: dict[str, str]) -> str:
@@ -259,3 +278,13 @@ class MessageParser:
         if parsed < 0:
             raise ValueError("timeout must be >= 0")
         return parsed
+
+    def _parse_repeat_count(self, value: str) -> int:
+        raw = value.strip()
+        try:
+            repeat_count = int(raw)
+        except Exception as exc:
+            raise ValueError(f"invalid repeat value: {value}") from exc
+        if repeat_count <= 0:
+            raise ValueError("repeat value must be > 0")
+        return repeat_count

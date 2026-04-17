@@ -30,6 +30,13 @@ def test_parse_timeout_seconds_and_plain_number() -> None:
     assert [item.delay_ms for item in parsed] == [1500, 250]
 
 
+def test_parse_repeat_one_shot_behavior() -> None:
+    parser = MessageParser()
+    messages = "@repeat 3\nA\nB\n@repeat 2\nC"
+    parsed = parser.parse_messages(messages, global_timeout_ms=500, hook_code="")
+    assert [item.text for item in parsed] == ["A", "A", "A", "B", "C", "C"]
+
+
 def test_parse_anchor_mapping() -> None:
     parser = MessageParser()
     hooks = "fields['id'] = 'abc'"
@@ -71,6 +78,19 @@ def test_clickhouse_missing_table_error_message() -> None:
         assert False
     except ValueError as exc:
         assert "set @clickhouse.table before JSON message" in str(exc)
+
+
+def test_clickhouse_repeat_one_shot_behavior() -> None:
+    parser = MessageParser()
+    messages = (
+        "@clickhouse.table events\n"
+        "@repeat 2\n"
+        '{"id":1}\n'
+        "@repeat 3\n"
+        "SELECT 1\n"
+    )
+    actions = parser.parse_clickhouse_messages(messages, global_timeout_ms=100, hook_code="")
+    assert [action.kind for action in actions] == ["json", "json", "sql", "sql", "sql"]
 
 
 def test_hooks_fields_must_be_dict_error_message() -> None:

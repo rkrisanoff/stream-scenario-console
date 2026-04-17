@@ -5,4 +5,5 @@
 #kafka-messages .cm-scroller, #clickhouse-messages .cm-scroller { overflow: auto !important; }
 #kafka-hooks .cm-editor, #clickhouse-hooks .cm-editor { height: 190px !important; }
 #kafka-hooks .cm-scroller, #clickhouse-hooks .cm-scroller { overflow: auto !important; }
+#kafka-console textarea, #clickhouse-console textarea { max-height: 260px !important; overflow-y: auto !important; font-family: monospace !important; }
 footer { display: none !important; }
