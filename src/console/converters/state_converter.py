@@ -6,7 +6,11 @@ from adaptix import Retort
 
 from console.dtos import AppStateDto, ClickHouseUseCaseDto, KafkaUseCaseDto
 from console.help_texts import (
-    DEFAULT_CLICKHOUSE_ENDPOINT,
+    DEFAULT_CLICKHOUSE_DATABASE,
+    DEFAULT_CLICKHOUSE_HOST,
+    DEFAULT_CLICKHOUSE_PASSWORD,
+    DEFAULT_CLICKHOUSE_PORT,
+    DEFAULT_CLICKHOUSE_USER,
     DEFAULT_GLOBAL_TIMEOUT_MS,
     DEFAULT_KAFKA_BOOTSTRAP_URL,
     DEFAULT_KAFKA_TOPIC,
@@ -18,6 +22,17 @@ from console.help_texts import (
 
 
 RETORT_STATE = Retort()
+
+type JsonPrimitive = str | int | float | bool | None
+type JsonValue = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
+type JsonDict = dict[str, JsonValue]
+
+
+def convert_int(value: JsonValue, fallback: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return fallback
 
 
 def load_default_kafka_use_case(name: str) -> KafkaUseCaseDto:
@@ -34,7 +49,11 @@ def load_default_kafka_use_case(name: str) -> KafkaUseCaseDto:
 def load_default_clickhouse_use_case(name: str) -> ClickHouseUseCaseDto:
     return ClickHouseUseCaseDto(
         name=name,
-        endpoint=DEFAULT_CLICKHOUSE_ENDPOINT,
+        host=DEFAULT_CLICKHOUSE_HOST,
+        port=DEFAULT_CLICKHOUSE_PORT,
+        user=DEFAULT_CLICKHOUSE_USER,
+        password=DEFAULT_CLICKHOUSE_PASSWORD,
+        database=DEFAULT_CLICKHOUSE_DATABASE,
         hooks=EXAMPLE_CLICKHOUSE_HOOKS,
         messages=EXAMPLE_CLICKHOUSE_MESSAGES,
         global_timeout_ms=DEFAULT_GLOBAL_TIMEOUT_MS,
@@ -50,54 +69,43 @@ def load_default_state() -> AppStateDto:
     )
 
 
-def convert_legacy_payload(payload: dict[str, object]) -> dict[str, object]:
+def convert_payload(payload: JsonDict) -> JsonDict:
     normalized = dict(payload)
-    if "kafka_chats" in normalized and "kafka_use_cases" not in normalized:
-        normalized["kafka_use_cases"] = normalized["kafka_chats"]
-    if "clickhouse_chats" in normalized and "clickhouse_use_cases" not in normalized:
-        normalized["clickhouse_use_cases"] = normalized["clickhouse_chats"]
     if isinstance(normalized.get("kafka_use_cases"), list):
-        kafka_rows: list[dict[str, object]] = []
+        kafka_rows: list[JsonDict] = []
         for item in normalized["kafka_use_cases"]:
             if not isinstance(item, dict):
                 continue
-            row = dict(item)
-            row.setdefault("name", "Kafka use case")
-            row.setdefault("bootstrap_url", DEFAULT_KAFKA_BOOTSTRAP_URL)
-            row.setdefault("topic", DEFAULT_KAFKA_TOPIC)
-            row.setdefault("hooks", EXAMPLE_KAFKA_HOOKS)
-            row.setdefault("messages", EXAMPLE_KAFKA_MESSAGES)
-            if "global_interval_ms" in row and "global_timeout_ms" not in row:
-                row["global_timeout_ms"] = row["global_interval_ms"]
-            row.setdefault("global_timeout_ms", DEFAULT_GLOBAL_TIMEOUT_MS)
-            row.pop("global_interval_ms", None)
+            row = {
+                "name": item.get("name", "Kafka use case"),
+                "bootstrap_url": item.get("bootstrap_url", DEFAULT_KAFKA_BOOTSTRAP_URL),
+                "topic": item.get("topic", DEFAULT_KAFKA_TOPIC),
+                "hooks": item.get("hooks", EXAMPLE_KAFKA_HOOKS),
+                "messages": item.get("messages", EXAMPLE_KAFKA_MESSAGES),
+                "global_timeout_ms": convert_int(item.get("global_timeout_ms"), DEFAULT_GLOBAL_TIMEOUT_MS),
+            }
             kafka_rows.append(row)
         normalized["kafka_use_cases"] = kafka_rows
     if isinstance(normalized.get("clickhouse_use_cases"), list):
-        clickhouse_rows: list[dict[str, object]] = []
+        clickhouse_rows: list[JsonDict] = []
         for item in normalized["clickhouse_use_cases"]:
             if not isinstance(item, dict):
                 continue
-            row = dict(item)
-            row.setdefault("name", "ClickHouse use case")
-            if "endpoint" not in row:
-                host = str(row.get("host", "localhost"))
-                port = int(row.get("port", 8123))
-                row["endpoint"] = f"{host}:{port}"
-            row.setdefault("hooks", EXAMPLE_CLICKHOUSE_HOOKS)
-            row.setdefault("messages", EXAMPLE_CLICKHOUSE_MESSAGES)
-            if "global_interval_ms" in row and "global_timeout_ms" not in row:
-                row["global_timeout_ms"] = row["global_interval_ms"]
-            row.setdefault("global_timeout_ms", DEFAULT_GLOBAL_TIMEOUT_MS)
-            row.pop("host", None)
-            row.pop("port", None)
-            row.pop("table_name", None)
-            row.pop("raw_sql_mode", None)
-            row.pop("global_interval_ms", None)
+            row = {
+                "name": item.get("name", "ClickHouse use case"),
+                "host": item.get("host", DEFAULT_CLICKHOUSE_HOST),
+                "port": convert_int(item.get("port"), DEFAULT_CLICKHOUSE_PORT),
+                "user": item.get("user", DEFAULT_CLICKHOUSE_USER),
+                "password": item.get("password", DEFAULT_CLICKHOUSE_PASSWORD),
+                "database": item.get("database", DEFAULT_CLICKHOUSE_DATABASE),
+                "hooks": item.get("hooks", EXAMPLE_CLICKHOUSE_HOOKS),
+                "messages": item.get("messages", EXAMPLE_CLICKHOUSE_MESSAGES),
+                "global_timeout_ms": convert_int(item.get("global_timeout_ms"), DEFAULT_GLOBAL_TIMEOUT_MS),
+            }
             clickhouse_rows.append(row)
         normalized["clickhouse_use_cases"] = clickhouse_rows
-    normalized.setdefault("selected_kafka_index", 0)
-    normalized.setdefault("selected_clickhouse_index", 0)
+    normalized["selected_kafka_index"] = convert_int(normalized.get("selected_kafka_index"), 0)
+    normalized["selected_clickhouse_index"] = convert_int(normalized.get("selected_clickhouse_index"), 0)
     return normalized
 
 
@@ -105,21 +113,12 @@ def dump_state_to_json(state: AppStateDto) -> str:
     return json.dumps(asdict(state), ensure_ascii=True, indent=2)
 
 
-def load_state_from_payload(payload: dict[str, object]) -> AppStateDto:
+def load_state_from_payload(payload: JsonDict) -> AppStateDto:
     return RETORT_STATE.load(payload, AppStateDto)
 
 
-def load_state_with_retort_scenarios(payload: dict[str, object]) -> AppStateDto:
-    scenarios: list[dict[str, object]] = [
-        payload,
-        convert_legacy_payload(payload),
-    ]
-    for scenario_payload in scenarios:
-        try:
-            return load_state_from_payload(scenario_payload)
-        except Exception:
-            continue
-    raise ValueError("state payload does not match supported schemas")
+def load_state_with_retort_scenarios(payload: JsonDict) -> AppStateDto:
+    return load_state_from_payload(convert_payload(payload))
 
 
 def convert_loaded_state(state: AppStateDto) -> AppStateDto:

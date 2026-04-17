@@ -8,28 +8,39 @@
 - директивы в сообщениях (`@timeout`, `@clickhouse.table`);
 - hooks как обычный Python-скрипт для генерации данных (`uuid4`, `datetime`, арифметика и т.д.).
 
-## Быстрый запуск
+## Установка uv (Astral)
 
-### Вариант 1: через `uv`
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Проверка:
+
+```bash
+uv --version
+```
+
+## Установка проекта
+
+### Вариант A: через `uv sync` (рекомендуется)
 
 ```bash
 uv sync
-uv run python ./app.py
 ```
 
-### Вариант 2: через `pip`
+### Вариант B
 
 ```bash
-python -m venv .venv
+uv venv .venv --python=3.14
 source .venv/bin/activate
-pip install -r requirements.txt
-python ./app.py
+uv pip install --editable .
+uv pip install --group dev --editable .
+```
+
+## Запуск приложения
+
+```bash
+uv run run-app
 ```
 
 После запуска открой локальный URL из терминала (обычно `http://127.0.0.1:7860`).
-
-## Тесты
-
-```bash
-uv run pytest --cov . -v
-```

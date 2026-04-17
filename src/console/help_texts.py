@@ -1,6 +1,10 @@
 DEFAULT_KAFKA_BOOTSTRAP_URL = "localhost:9092"
 DEFAULT_KAFKA_TOPIC = "events"
-DEFAULT_CLICKHOUSE_ENDPOINT = "localhost:8123"
+DEFAULT_CLICKHOUSE_HOST = "localhost"
+DEFAULT_CLICKHOUSE_PORT = 8123
+DEFAULT_CLICKHOUSE_USER = "default"
+DEFAULT_CLICKHOUSE_PASSWORD = ""
+DEFAULT_CLICKHOUSE_DATABASE = "default"
 DEFAULT_GLOBAL_TIMEOUT_MS = 500
 
 EXAMPLE_KAFKA_HOOKS = (
@@ -35,6 +39,7 @@ def build_main_help_columns(timeout_directive: str, clickhouse_table_directive: 
         "### Общая справка\n"
         f"- `{timeout_directive}` влияет только на следующую строку.\n"
         f"- `{clickhouse_table_directive}` нужен перед JSON для ClickHouse.\n"
+        "- ClickHouse connection: host, port, user, password, database.\n"
         "- Hooks: обычный Python script, результат через `fields`.\n"
         "- Якоря: `{{name}}`.\n"
         "- `import os` и системные операции запрещены.\n\n"

@@ -55,8 +55,11 @@ HOOKS_MAX_VALUE_CHARS = 4096
 HOOKS_TOO_LARGE_ERROR_MESSAGE = f"hooks: code is too large; max {HOOKS_MAX_CODE_CHARS} chars"
 HOOKS_TIMEOUT_ERROR_MESSAGE = f"hooks: execution timeout; max {HOOKS_MAX_EXECUTION_SECONDS} seconds"
 
+type JsonPrimitive = str | int | float | bool | None
+type JsonValue = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
 
-def _convert_fields_with_limits(raw_fields: object) -> dict[str, str]:
+
+def _convert_fields_with_limits(raw_fields: JsonValue) -> dict[str, str]:
     if not isinstance(raw_fields, dict):
         raise ValueError("hooks: fields must be dict")
     if len(raw_fields) > HOOKS_MAX_FIELDS:
@@ -76,7 +79,7 @@ def _convert_fields_with_limits(raw_fields: object) -> dict[str, str]:
 
 def _run_hooks_worker(hook_code: str, result_queue: mp.Queue) -> None:
     try:
-        scope: dict[str, object] = {
+        scope = {
             "__builtins__": __builtins__,
             "uuid4": uuid4,
             "fields": {},

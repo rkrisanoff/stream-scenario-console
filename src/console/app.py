@@ -1,4 +1,5 @@
 import asyncio
+import clickhouse_connect
 import json
 from pathlib import Path
 import time
@@ -27,6 +28,9 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 APP_CSS = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
 APP_JS = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 PARSER = MessageParser()
+
+type UiRowsUpdate = dict[str, str | list[list[str]]]
+type UiValue = AppState | UiRowsUpdate | str | int | float | None
 
 
 def default_state() -> AppState:
@@ -62,7 +66,11 @@ def clickhouse_view(state: AppState, status: str = "") -> ClickHouseView:
         state=state,
         rows_update=gr.update(value=clickhouse_rows(state)),
         name=use_case.name,
-        endpoint=use_case.endpoint,
+        host=use_case.host,
+        port=use_case.port,
+        user=use_case.user,
+        password=use_case.password,
+        database=use_case.database,
         hooks=use_case.hooks,
         messages=use_case.messages,
         global_timeout_ms=use_case.global_timeout_ms,
@@ -70,7 +78,7 @@ def clickhouse_view(state: AppState, status: str = "") -> ClickHouseView:
     )
 
 
-def render_kafka_view(view: KafkaView) -> list[object]:
+def render_kafka_view(view: KafkaView) -> list[UiValue]:
     return [
         view.state,
         view.rows_update,
@@ -84,12 +92,16 @@ def render_kafka_view(view: KafkaView) -> list[object]:
     ]
 
 
-def render_clickhouse_view(view: ClickHouseView) -> list[object]:
+def render_clickhouse_view(view: ClickHouseView) -> list[UiValue]:
     return [
         view.state,
         view.rows_update,
         view.name,
-        view.endpoint,
+        view.host,
+        view.port,
+        view.user,
+        view.password,
+        view.database,
         view.hooks,
         view.messages,
         view.global_timeout_ms,
@@ -97,7 +109,7 @@ def render_clickhouse_view(view: ClickHouseView) -> list[object]:
     ]
 
 
-def render_load_view(view: LoadView) -> list[object]:
+def render_load_view(view: LoadView) -> list[UiValue]:
     return [
         view.state,
         view.kafka.rows_update,
@@ -110,7 +122,11 @@ def render_load_view(view: LoadView) -> list[object]:
         view.kafka.status,
         view.clickhouse.rows_update,
         view.clickhouse.name,
-        view.clickhouse.endpoint,
+        view.clickhouse.host,
+        view.clickhouse.port,
+        view.clickhouse.user,
+        view.clickhouse.password,
+        view.clickhouse.database,
         view.clickhouse.hooks,
         view.clickhouse.messages,
         view.clickhouse.global_timeout_ms,
@@ -119,31 +135,24 @@ def render_load_view(view: LoadView) -> list[object]:
     ]
 
 
-def load_rendered_view() -> list[object]:
+def load_rendered_view() -> list[UiValue]:
     return render_load_view(load_all())
 
 
-def select_kafka_rendered(state: AppState, evt: gr.SelectData) -> list[object]:
+def select_kafka_rendered(state: AppState, evt: gr.SelectData) -> list[UiValue]:
     return render_kafka_view(select_kafka(state, evt))
 
 
-def select_clickhouse_rendered(state: AppState, evt: gr.SelectData) -> list[object]:
+def select_clickhouse_rendered(state: AppState, evt: gr.SelectData) -> list[UiValue]:
     return render_clickhouse_view(select_clickhouse(state, evt))
 
 
-def extract_row_index(raw_index: int | tuple[int, int] | list[object]) -> int:
+def extract_row_index(raw_index: int | tuple[int, int] | list[int] | list[list[int]]) -> int:
     if isinstance(raw_index, tuple):
         return int(raw_index[0])
     if isinstance(raw_index, list):
         return int(raw_index[0]) if raw_index else -1
     return int(raw_index)
-
-
-def parse_endpoint(endpoint: str) -> tuple[str, int]:
-    host, _, port = endpoint.strip().rpartition(":")
-    if not host or not port:
-        raise ValueError("endpoint must be host:port")
-    return host, int(port)
 
 
 def save_kafka_form(state: AppState, bootstrap_url: str, topic: str, hooks: str, messages: str, global_timeout_ms: float) -> AppState:
@@ -156,9 +165,23 @@ def save_kafka_form(state: AppState, bootstrap_url: str, topic: str, hooks: str,
     return state
 
 
-def save_clickhouse_form(state: AppState, endpoint: str, hooks: str, messages: str, global_timeout_ms: float) -> AppState:
+def save_clickhouse_form(
+    state: AppState,
+    host: str,
+    port: float,
+    user: str,
+    password: str,
+    database: str,
+    hooks: str,
+    messages: str,
+    global_timeout_ms: float,
+) -> AppState:
     use_case = state.clickhouse_use_cases[state.selected_clickhouse_index]
-    use_case.endpoint = endpoint.strip()
+    use_case.host = host.strip()
+    use_case.port = int(port)
+    use_case.user = user.strip()
+    use_case.password = password
+    use_case.database = database.strip()
     use_case.hooks = hooks
     use_case.messages = messages
     use_case.global_timeout_ms = int(global_timeout_ms)
@@ -245,16 +268,27 @@ async def send_kafka(state: AppState, bootstrap_url: str, topic: str, hooks: str
     return state, f"ok: sent {len(parsed)}"
 
 
-def send_clickhouse(state: AppState, endpoint: str, hooks: str, messages: str, global_timeout_ms: float) -> tuple[AppState, str]:
-    save_clickhouse_form(state, endpoint, hooks, messages, global_timeout_ms)
+def send_clickhouse(
+    state: AppState,
+    host: str,
+    port: float,
+    user: str,
+    password: str,
+    database: str,
+    hooks: str,
+    messages: str,
+    global_timeout_ms: float,
+) -> tuple[AppState, str]:
+    save_clickhouse_form(state, host, port, user, password, database, hooks, messages, global_timeout_ms)
     try:
-        import clickhouse_connect
-    except Exception as exc:
-        return state, f"error: {exc}"
-    try:
-        host, port = parse_endpoint(endpoint)
         actions = PARSER.parse_clickhouse_messages(messages, int(global_timeout_ms), hooks)
-        client = clickhouse_connect.get_client(host=host, port=port)
+        client = clickhouse_connect.get_client(
+            host=host.strip(),
+            port=int(port),
+            username=user.strip(),
+            password=password,
+            database=database.strip(),
+        )
         for index, action in enumerate(actions):
             if action.kind == "json":
                 row = json.loads(action.text)
@@ -277,13 +311,27 @@ def save_all(
     kafka_hooks: str,
     kafka_messages: str,
     kafka_timeout: float,
-    clickhouse_endpoint: str,
+    clickhouse_host: str,
+    clickhouse_port: float,
+    clickhouse_user: str,
+    clickhouse_password: str,
+    clickhouse_database: str,
     clickhouse_hooks: str,
     clickhouse_messages: str,
     clickhouse_timeout: float,
 ) -> tuple[AppState, str]:
     save_kafka_form(state, kafka_url, kafka_topic, kafka_hooks, kafka_messages, kafka_timeout)
-    save_clickhouse_form(state, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout)
+    save_clickhouse_form(
+        state,
+        clickhouse_host,
+        clickhouse_port,
+        clickhouse_user,
+        clickhouse_password,
+        clickhouse_database,
+        clickhouse_hooks,
+        clickhouse_messages,
+        clickhouse_timeout,
+    )
     dump_state(CONFIG_PATH, state)
     return state, "ok: configuration saved"
 
@@ -345,18 +393,63 @@ with gr.Blocks(title="QA ClickHouse Kafka Helper", fill_width=True) as app:
                         clickhouse_rename = gr.Button("✎")
                         clickhouse_delete = gr.Button("🗑")
                 with gr.Column(scale=4):
-                    clickhouse_endpoint = gr.Textbox(label="Endpoint", value=initial_clickhouse.endpoint)
+                    clickhouse_host = gr.Textbox(label="Host", value=initial_clickhouse.host)
+                    clickhouse_port = gr.Number(label="Port", precision=0, value=initial_clickhouse.port)
+                    clickhouse_user = gr.Textbox(label="User", value=initial_clickhouse.user)
+                    clickhouse_password = gr.Textbox(label="Password", value=initial_clickhouse.password, type="password")
+                    clickhouse_database = gr.Textbox(label="Database", value=initial_clickhouse.database)
                     clickhouse_hooks = gr.Code(label="Hooks", language="python", lines=10, value=initial_clickhouse.hooks, elem_id="clickhouse-hooks")
                     clickhouse_messages = gr.Code(label="Messages", language="sql", lines=14, value=initial_clickhouse.messages, elem_id="clickhouse-messages")
                     clickhouse_timeout = gr.Number(label="Global timeout (ms)", precision=0, value=initial_clickhouse.global_timeout_ms)
                     clickhouse_send = gr.Button("Send")
                     clickhouse_status = gr.Textbox(label="Status", interactive=False, value="")
 
-    save_button.click(save_all, [state, kafka_url, kafka_topic, kafka_hooks, kafka_messages, kafka_timeout, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state, save_status])
+    save_button.click(
+        save_all,
+        [
+            state,
+            kafka_url,
+            kafka_topic,
+            kafka_hooks,
+            kafka_messages,
+            kafka_timeout,
+            clickhouse_host,
+            clickhouse_port,
+            clickhouse_user,
+            clickhouse_password,
+            clickhouse_database,
+            clickhouse_hooks,
+            clickhouse_messages,
+            clickhouse_timeout,
+        ],
+        [state, save_status],
+    )
     load_button.click(
         load_rendered_view,
         [],
-        [state, kafka_list, kafka_name, kafka_url, kafka_topic, kafka_hooks, kafka_messages, kafka_timeout, kafka_status, clickhouse_list, clickhouse_name, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout, clickhouse_status, save_status],
+        [
+            state,
+            kafka_list,
+            kafka_name,
+            kafka_url,
+            kafka_topic,
+            kafka_hooks,
+            kafka_messages,
+            kafka_timeout,
+            kafka_status,
+            clickhouse_list,
+            clickhouse_name,
+            clickhouse_host,
+            clickhouse_port,
+            clickhouse_user,
+            clickhouse_password,
+            clickhouse_database,
+            clickhouse_hooks,
+            clickhouse_messages,
+            clickhouse_timeout,
+            clickhouse_status,
+            save_status,
+        ],
     )
 
     kafka_list.select(
@@ -389,28 +482,32 @@ with gr.Blocks(title="QA ClickHouse Kafka Helper", fill_width=True) as app:
     clickhouse_list.select(
         select_clickhouse_rendered,
         [state],
-        [state, clickhouse_list, clickhouse_name, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout, clickhouse_status],
+        [state, clickhouse_list, clickhouse_name, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout, clickhouse_status],
     )
     clickhouse_add.click(
         lambda app_state: render_clickhouse_view(add_clickhouse(app_state)),
         [state],
-        [state, clickhouse_list, clickhouse_name, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout, clickhouse_status],
+        [state, clickhouse_list, clickhouse_name, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout, clickhouse_status],
     )
     clickhouse_rename.click(
         lambda app_state, name: render_clickhouse_view(rename_clickhouse(app_state, name)),
         [state, clickhouse_name],
-        [state, clickhouse_list, clickhouse_name, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout, clickhouse_status],
+        [state, clickhouse_list, clickhouse_name, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout, clickhouse_status],
     )
     clickhouse_delete.click(
         lambda app_state: render_clickhouse_view(delete_clickhouse(app_state)),
         [state],
-        [state, clickhouse_list, clickhouse_name, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout, clickhouse_status],
+        [state, clickhouse_list, clickhouse_name, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout, clickhouse_status],
     )
-    clickhouse_endpoint.change(save_clickhouse_form, [state, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
-    clickhouse_hooks.change(save_clickhouse_form, [state, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
-    clickhouse_messages.change(save_clickhouse_form, [state, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
-    clickhouse_timeout.change(save_clickhouse_form, [state, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
-    clickhouse_send.click(send_clickhouse, [state, clickhouse_endpoint, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state, clickhouse_status])
+    clickhouse_host.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
+    clickhouse_port.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
+    clickhouse_user.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
+    clickhouse_password.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
+    clickhouse_database.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
+    clickhouse_hooks.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
+    clickhouse_messages.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
+    clickhouse_timeout.change(save_clickhouse_form, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state])
+    clickhouse_send.click(send_clickhouse, [state, clickhouse_host, clickhouse_port, clickhouse_user, clickhouse_password, clickhouse_database, clickhouse_hooks, clickhouse_messages, clickhouse_timeout], [state, clickhouse_status])
 
 
 def main() -> None:

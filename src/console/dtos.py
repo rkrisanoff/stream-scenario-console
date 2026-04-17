@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+type GradioRowsUpdate = dict[str, str | list[list[str]]]
+
 
 @dataclass(slots=True)
 class KafkaUseCaseDto:
@@ -14,7 +16,11 @@ class KafkaUseCaseDto:
 @dataclass(slots=True)
 class ClickHouseUseCaseDto:
     name: str
-    endpoint: str
+    host: str
+    port: int
+    user: str
+    password: str
+    database: str
     hooks: str
     messages: str
     global_timeout_ms: int
@@ -31,7 +37,7 @@ class AppStateDto:
 @dataclass(slots=True)
 class KafkaViewDto:
     state: AppStateDto
-    rows_update: object
+    rows_update: GradioRowsUpdate
     name: str
     bootstrap_url: str
     topic: str
@@ -44,9 +50,13 @@ class KafkaViewDto:
 @dataclass(slots=True)
 class ClickHouseViewDto:
     state: AppStateDto
-    rows_update: object
+    rows_update: GradioRowsUpdate
     name: str
-    endpoint: str
+    host: str
+    port: int
+    user: str
+    password: str
+    database: str
     hooks: str
     messages: str
     global_timeout_ms: int
