@@ -1,6 +1,7 @@
 from dataclasses import asdict
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from adaptix import Retort
 
@@ -37,6 +38,7 @@ def convert_int(value: JsonValue, fallback: int) -> int:
 
 def load_default_kafka_use_case(name: str) -> KafkaUseCaseDto:
     return KafkaUseCaseDto(
+        id=str(uuid4()),
         name=name,
         bootstrap_url=DEFAULT_KAFKA_BOOTSTRAP_URL,
         topic=DEFAULT_KAFKA_TOPIC,
@@ -48,6 +50,7 @@ def load_default_kafka_use_case(name: str) -> KafkaUseCaseDto:
 
 def load_default_clickhouse_use_case(name: str) -> ClickHouseUseCaseDto:
     return ClickHouseUseCaseDto(
+        id=str(uuid4()),
         name=name,
         host=DEFAULT_CLICKHOUSE_HOST,
         port=DEFAULT_CLICKHOUSE_PORT,
@@ -73,10 +76,11 @@ def convert_payload(payload: JsonDict) -> JsonDict:
     normalized = dict(payload)
     if isinstance(normalized.get("kafka_use_cases"), list):
         kafka_rows: list[JsonDict] = []
-        for item in normalized["kafka_use_cases"]:
+        for index, item in enumerate(normalized["kafka_use_cases"]):
             if not isinstance(item, dict):
                 continue
             row = {
+                "id": item.get("id", f"kafka-{index + 1}"),
                 "name": item.get("name", "Kafka use case"),
                 "bootstrap_url": item.get("bootstrap_url", DEFAULT_KAFKA_BOOTSTRAP_URL),
                 "topic": item.get("topic", DEFAULT_KAFKA_TOPIC),
@@ -88,10 +92,11 @@ def convert_payload(payload: JsonDict) -> JsonDict:
         normalized["kafka_use_cases"] = kafka_rows
     if isinstance(normalized.get("clickhouse_use_cases"), list):
         clickhouse_rows: list[JsonDict] = []
-        for item in normalized["clickhouse_use_cases"]:
+        for index, item in enumerate(normalized["clickhouse_use_cases"]):
             if not isinstance(item, dict):
                 continue
             row = {
+                "id": item.get("id", f"clickhouse-{index + 1}"),
                 "name": item.get("name", "ClickHouse use case"),
                 "host": item.get("host", DEFAULT_CLICKHOUSE_HOST),
                 "port": convert_int(item.get("port"), DEFAULT_CLICKHOUSE_PORT),

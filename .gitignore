@@ -8,3 +8,14 @@ wheels/
 
 # Virtual environments
 .venv
+components/**/.venv/
+
+# Local configuration
+configuration.json
+configuration.backups/
+
+# Tests
+.pytest_cache/
+
+# Node
+components/**/node_modules/

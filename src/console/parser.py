@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from enum import StrEnum
 import json
-import multiprocessing as mp
 import re
+import subprocess
+import sys
 from uuid import uuid4
 
 
@@ -58,6 +59,23 @@ HOOKS_MAX_VALUE_CHARS = 4096
 HOOKS_TOO_LARGE_ERROR_MESSAGE = f"hooks: code is too large; max {HOOKS_MAX_CODE_CHARS} chars"
 HOOKS_TIMEOUT_ERROR_MESSAGE = f"hooks: execution timeout; max {HOOKS_MAX_EXECUTION_SECONDS} seconds"
 
+_HOOKS_SUBPROCESS_RUNNER = """
+import json
+import sys
+from uuid import uuid4
+
+hook_code = sys.stdin.read()
+scope = {"__builtins__": __builtins__, "uuid4": uuid4, "fields": {}}
+try:
+    exec(hook_code, scope, scope)
+    fields = scope.get("fields", {})
+    if not isinstance(fields, dict):
+        raise ValueError("hooks: fields must be dict")
+    print(json.dumps({"status": "ok", "payload": fields}, ensure_ascii=True))
+except Exception as exc:
+    print(json.dumps({"status": "error", "payload": str(exc)}, ensure_ascii=True))
+"""
+
 type JsonPrimitive = str | int | float | bool | None
 type JsonValue = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
 
@@ -80,18 +98,26 @@ def _convert_fields_with_limits(raw_fields: JsonValue) -> dict[str, str]:
     return result
 
 
-def _run_hooks_worker(hook_code: str, result_queue: mp.Queue) -> None:
+def _run_hooks_in_subprocess(hook_code: str) -> dict[str, str]:
     try:
-        scope = {
-            "__builtins__": __builtins__,
-            "uuid4": uuid4,
-            "fields": {},
-        }
-        exec(hook_code, scope, scope)
-        result = _convert_fields_with_limits(scope.get("fields", {}))
-        result_queue.put(("ok", result))
-    except Exception as exc:
-        result_queue.put(("error", str(exc)))
+        completed = subprocess.run(
+            [sys.executable, "-c", _HOOKS_SUBPROCESS_RUNNER],
+            input=hook_code,
+            capture_output=True,
+            text=True,
+            timeout=HOOKS_MAX_EXECUTION_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(HOOKS_TIMEOUT_ERROR_MESSAGE) from exc
+    stdout = completed.stdout.strip()
+    if not stdout:
+        raise ValueError("hooks: execution failed")
+    data = json.loads(stdout)
+    if data.get("status") != "ok":
+        payload = str(data.get("payload", "unknown error"))
+        raise ValueError(f"hooks: execution failed: {payload}")
+    return _convert_fields_with_limits(data["payload"])
 
 
 @dataclass(slots=True)
@@ -126,21 +152,7 @@ class MessageParser:
         for token in HOOKS_FORBIDDEN_TOKENS:
             if token in lowered:
                 raise ValueError(HOOKS_FORBIDDEN_ERROR_MESSAGE)
-        mp_context = mp.get_context("fork")
-        result_queue: mp.Queue = mp_context.Queue(maxsize=1)
-        process = mp_context.Process(target=_run_hooks_worker, args=(hook_code, result_queue), daemon=True)
-        process.start()
-        process.join(HOOKS_MAX_EXECUTION_SECONDS)
-        if process.is_alive():
-            process.terminate()
-            process.join()
-            raise ValueError(HOOKS_TIMEOUT_ERROR_MESSAGE)
-        if result_queue.empty():
-            raise ValueError("hooks: execution failed")
-        status, payload = result_queue.get_nowait()
-        if status == "error":
-            raise ValueError(f"hooks: execution failed: {payload}")
-        return payload
+        return _run_hooks_in_subprocess(hook_code)
 
     def parse_lines(self, messages_text: str) -> list[ParsedLine]:
         result: list[ParsedLine] = []

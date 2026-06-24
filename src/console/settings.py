@@ -1,0 +1,1 @@
+ALLOW_USE_CASE_DELETE = False

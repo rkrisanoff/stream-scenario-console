@@ -1,9 +1,76 @@
 .gradio-container { max-width: 100% !important; }
-#kafka-use-cases, #clickhouse-use-cases { width: 280px !important; max-width: 280px !important; }
-#kafka-use-cases .wrap, #clickhouse-use-cases .wrap { max-height: 320px !important; overflow-y: auto !important; }
-#kafka-messages .cm-editor, #clickhouse-messages .cm-editor { height: 320px !important; }
-#kafka-messages .cm-scroller, #clickhouse-messages .cm-scroller { overflow: auto !important; }
-#kafka-hooks .cm-editor, #clickhouse-hooks .cm-editor { height: 190px !important; }
-#kafka-hooks .cm-scroller, #clickhouse-hooks .cm-scroller { overflow: auto !important; }
-#kafka-console textarea, #clickhouse-console textarea { max-height: 260px !important; overflow-y: auto !important; font-family: monospace !important; }
-footer { display: none !important; }
+
+#config-status-row {
+    align-items: stretch !important;
+    gap: 10px !important;
+    margin: 8px 0 12px !important;
+}
+
+#save-status input,
+#save-status textarea {
+    border: none !important;
+    background: var(--background-fill-secondary) !important;
+    font-size: 0.9rem !important;
+    padding: 10px 14px !important;
+    box-shadow: none !important;
+    min-height: 42px !important;
+    width: 100% !important;
+}
+
+#config-open-btn button {
+    min-height: 42px !important;
+    min-width: 140px !important;
+    font-weight: 600 !important;
+}
+
+#config-sidebar.config-sidebar-panel {
+    z-index: 1000;
+}
+
+#config-sidebar .config-action-btn button {
+    width: 100% !important;
+    min-height: 40px !important;
+}
+
+#kafka-use-cases,
+#clickhouse-use-cases {
+    width: 100% !important;
+    max-width: 280px !important;
+}
+
+#kafka-use-cases .wrap,
+#clickhouse-use-cases .wrap {
+    max-height: 320px !important;
+    overflow-y: auto !important;
+}
+
+#kafka-messages .cm-editor,
+#clickhouse-messages .cm-editor {
+    height: 320px !important;
+}
+
+#kafka-messages .cm-scroller,
+#clickhouse-messages .cm-scroller {
+    overflow: auto !important;
+}
+
+#kafka-hooks .cm-editor,
+#clickhouse-hooks .cm-editor {
+    height: 190px !important;
+}
+
+#kafka-hooks .cm-scroller,
+#clickhouse-hooks .cm-scroller {
+    overflow: auto !important;
+}
+
+#kafka-console textarea,
+#clickhouse-console textarea {
+    max-height: 260px !important;
+    overflow-y: auto !important;
+    font-family: monospace !important;
+}
+
+footer {
+    display: none !important;
+}
