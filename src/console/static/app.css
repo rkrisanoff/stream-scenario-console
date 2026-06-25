@@ -17,12 +17,6 @@
     width: 100% !important;
 }
 
-#config-open-btn button {
-    min-height: 42px !important;
-    min-width: 140px !important;
-    font-weight: 600 !important;
-}
-
 #config-sidebar.config-sidebar-panel {
     z-index: 1000;
 }

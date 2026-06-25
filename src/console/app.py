@@ -116,14 +116,6 @@ def create_app() -> gr.Blocks:
                 container=False,
                 lines=1,
                 max_lines=1,
-                scale=4,
-                min_width=200,
-            )
-            config_open_button = gr.Button(
-                "Конфигурация",
-                scale=0,
-                min_width=140,
-                elem_id="config-open-btn",
             )
 
         autosave_timer = gr.Timer(AUTOSAVE_DEBOUNCE_SEC, active=True)
@@ -354,7 +346,6 @@ def create_app() -> gr.Blocks:
             clickhouse_timeout,
             clickhouse_console,
         ]
-        config_open_button.click(lambda: gr.update(open=True), None, config_sidebar)
         wire_config_actions(
             save_button,
             load_button,

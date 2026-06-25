@@ -23,6 +23,7 @@ gradio_verticalusecaselist = { path = "components/vertical_use_case_list", edita
 dev = [
     "pytest>=8.4.2",
     "pytest-asyncio>=0.25.0",
+    "build>=1.0.0",
 ]
 
 [project.scripts]
